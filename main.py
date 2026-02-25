@@ -42,8 +42,8 @@ async def on_ready():
 @commands.has_permissions(administrator=True)
 async def parlay(ctx, name: str, *args):
     if len(args) < 2 or len(args) % 2 != 0:
-        await ctx.message.delete()
-        return
+    await ctx.send("Usage: !parlay <name> <team> <odds> <team> <odds> ...")
+    return
 
     pairs = [(args[i], args[i+1]) for i in range(0, len(args), 2)]
 

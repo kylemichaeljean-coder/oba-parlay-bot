@@ -11,7 +11,6 @@ intents.reactions = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 active_parlays = {}
-
 EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
 
 # ---------------- READY ----------------
@@ -25,6 +24,23 @@ async def on_ready():
 def build_bar(percent):
     filled = int(percent / 10)
     return "▰" * filled + "▱" * (10 - filled)
+
+def get_color(end_time):
+    now = datetime.utcnow()
+    total = 3600
+    remaining = (end_time - now).total_seconds()
+
+    if remaining <= 0:
+        return discord.Color.red()
+
+    ratio = remaining / total
+
+    if ratio > 0.66:
+        return discord.Color.green()
+    elif ratio > 0.33:
+        return discord.Color.gold()
+    else:
+        return discord.Color.red()
 
 async def update_embed(message_id):
     parlay = active_parlays.get(message_id)
@@ -52,6 +68,8 @@ async def update_embed(message_id):
         new_description += f"{EMOJIS[i]} **{team}** (+{odds})\n{bar} {int(percent)}%\n\n"
 
     embed.description = new_description
+    embed.color = get_color(parlay["end_time"])
+
     await message.edit(embed=embed)
 
 # ---------------- PARLAY ----------------
@@ -93,7 +111,7 @@ async def parlay(ctx, name: str, *args):
 
     asyncio.create_task(auto_lock(message.id))
 
-# ---------------- REACTION UPDATE ----------------
+# ---------------- ONE PICK ENFORCEMENT ----------------
 
 @bot.event
 async def on_reaction_add(reaction, user):
@@ -102,12 +120,23 @@ async def on_reaction_add(reaction, user):
 
     message_id = reaction.message.id
 
-    if message_id in active_parlays:
-        if active_parlays[message_id]["locked"]:
-            await reaction.remove(user)
-            return
+    if message_id not in active_parlays:
+        return
 
-        await update_embed(message_id)
+    parlay = active_parlays[message_id]
+
+    if parlay["locked"]:
+        await reaction.remove(user)
+        return
+
+    # Remove other reactions from same user
+    for react in reaction.message.reactions:
+        if react.emoji in EMOJIS and react.emoji != reaction.emoji:
+            users = [u async for u in react.users()]
+            if user in users:
+                await react.remove(user)
+
+    await update_embed(message_id)
 
 @bot.event
 async def on_reaction_remove(reaction, user):
@@ -165,15 +194,6 @@ async def finalize_parlay(message_id):
     await message.edit(embed=embed)
 
     active_parlays.pop(message_id, None)
-
-# ---------------- LEADERBOARD ----------------
-
-@bot.command(name="leaderboard")
-async def leaderboard_cmd(ctx):
-
-    await ctx.message.delete()
-
-    await ctx.send("Leaderboard system coming next 👀")
 
 # ---------------- RUN ----------------
 

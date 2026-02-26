@@ -269,7 +269,84 @@ async def newcycle(ctx):
     save_data(leaderboard_data)
 
     await ctx.send("🔄 New cycle started! Leaderboard reset.")
+# ---------------- CLOSE EARLY ----------------
 
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def close(ctx):
+
+    await ctx.message.delete()
+
+    if not ctx.message.reference:
+        await ctx.send("Reply to the parlay message to close it.")
+        return
+
+    message_id = ctx.message.reference.message_id
+
+    if message_id not in active_parlays:
+        await ctx.send("That message is not an active parlay.")
+        return
+
+    await finalize_parlay(message_id)
+    # ---------------- SET WINNER (MANUAL) ----------------
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setwinner(ctx, emoji: str):
+
+    await ctx.message.delete()
+
+    if not ctx.message.reference:
+        await ctx.send("Reply to the parlay message to set winner.")
+        return
+
+    message_id = ctx.message.reference.message_id
+
+    if message_id not in active_parlays:
+        await ctx.send("That message is not an active parlay.")
+        return
+
+    if emoji not in EMOJIS:
+        await ctx.send("Invalid emoji. Use one of the reaction emojis.")
+        return
+
+    parlay = active_parlays.get(message_id)
+    message = await parlay["message"].channel.fetch_message(message_id)
+    embed = message.embeds[0]
+
+    guild_id = parlay["guild_id"]
+    leaderboard_data.setdefault(guild_id, {})
+
+    index = EMOJIS.index(emoji)
+    team, odds = parlay["teams"][index]
+    points = odds_to_points(odds)
+
+    # Get users who reacted to that emoji
+    winner_users = []
+    for reaction in message.reactions:
+        if reaction.emoji == emoji:
+            winner_users = [u async for u in reaction.users() if not u.bot]
+
+    for user in winner_users:
+        user_id = str(user.id)
+        leaderboard_data[guild_id].setdefault(user_id, {"correct": 0, "points": 0})
+        leaderboard_data[guild_id][user_id]["correct"] += 1
+        leaderboard_data[guild_id][user_id]["points"] += points
+
+    save_data(leaderboard_data)
+
+    embed.add_field(name="🏆 Winner (Manual)", value=team, inline=False)
+    embed.add_field(name="⭐ Points Awarded", value=f"{points} pts", inline=False)
+
+    if winner_users:
+        embed.add_field(name="👑 MVP", value=winner_users[0].mention, inline=False)
+
+    embed.color = discord.Color.red()
+    embed.set_footer(text="🔒 Locked (Manual Override)")
+
+    await message.edit(embed=embed)
+
+    active_parlays.pop(message_id, None)
 # ---------------- ERROR HANDLER ----------------
 
 @bot.event

@@ -59,7 +59,16 @@ def get_color(end_time):
         return discord.Color.red()
 
 def odds_to_points(odds):
-    return int(int(odds) / 100)
+    odds = int(odds)
+
+    # Positive odds (+300 etc)
+    if odds > 0:
+        return round(odds / 100)
+
+    # Negative odds (-150 etc)
+    else:
+        # Higher risk = more reward
+        return round(abs(odds) / 200)
 
 # ---------------- UPDATE EMBED ----------------
 

@@ -60,6 +60,7 @@ def get_color(end_time):
 
 def odds_to_points(odds):
     odds = int(odds)
+    return max(1, round(abs(odds) / 100))
 
     # Positive odds (+300 etc)
     if odds > 0:

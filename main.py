@@ -42,7 +42,7 @@ def odds_to_points(odds):
 
     odds=int(odds)
 
-    if odds > 0:
+    if odds>0:
         return max(1,round(odds/100))
     else:
         return max(1,round(abs(odds)/200))
@@ -144,6 +144,7 @@ async def on_reaction_add(reaction,user):
         await reaction.remove(user)
         return
 
+    # enforce one pick per user
     for react in reaction.message.reactions:
 
         if react.emoji in EMOJIS and react.emoji!=reaction.emoji:

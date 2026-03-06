@@ -1,8 +1,6 @@
 import discord
 from discord.ext import commands
 import os
-import asyncio
-from datetime import datetime, timedelta
 import json
 
 intents = discord.Intents.default()
@@ -13,9 +11,9 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 EMOJIS = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣"]
 
-LEADERBOARD_FILE = "leaderboard.json"
-
 active_parlays = {}
+
+LEADERBOARD_FILE = "leaderboard.json"
 
 # ---------------- STORAGE ----------------
 
@@ -36,7 +34,7 @@ leaderboard_data = load_data()
 
 @bot.event
 async def on_ready():
-    print(f"Logged in as {bot.user}")
+    print(f"Bot online: {bot.user}")
 
 # ---------------- UTIL ----------------
 
@@ -48,12 +46,6 @@ def odds_to_points(odds):
         return max(1,round(odds/100))
     else:
         return max(1,round(abs(odds)/200))
-
-
-def build_bar(percent):
-
-    filled=int(percent/10)
-    return "▰"*filled+"▱"*(10-filled)
 
 # ---------------- PARLAY ----------------
 
@@ -80,8 +72,6 @@ async def parlay(ctx,name:str,*args):
 
         embed.description+=f"{EMOJIS[i]} **{team}** (+{odds}) • {pts} pts\n"
 
-    embed.set_footer(text="⏳ Auto locks in 1 hour")
-
     message=await ctx.send(embed=embed)
 
     for i in range(len(teams)):
@@ -90,66 +80,9 @@ async def parlay(ctx,name:str,*args):
     active_parlays[message.id]={
         "teams":teams,
         "message":message,
-        "end":datetime.utcnow()+timedelta(hours=1),
+        "guild_id":str(ctx.guild.id),
         "locked":False
     }
-
-    asyncio.create_task(auto_lock(message.id))
-
-# ---------------- ONE PICK ----------------
-
-@bot.event
-async def on_reaction_add(reaction,user):
-
-    if user.bot:
-        return
-
-    message_id=reaction.message.id
-
-    if message_id not in active_parlays:
-        return
-
-    parlay=active_parlays[message_id]
-
-    if parlay["locked"]:
-        await reaction.remove(user)
-        return
-
-    for react in reaction.message.reactions:
-
-        if react.emoji in EMOJIS and react.emoji!=reaction.emoji:
-
-            users=[u async for u in react.users() if not u.bot]
-
-            if user in users:
-                await react.remove(user)
-
-# ---------------- AUTO LOCK ----------------
-
-async def auto_lock(message_id):
-
-    await asyncio.sleep(3600)
-
-    if message_id in active_parlays:
-        await lock_parlay(message_id)
-
-async def lock_parlay(message_id):
-
-    parlay=active_parlays.get(message_id)
-
-    if not parlay:
-        return
-
-    message=await parlay["message"].channel.fetch_message(message_id)
-
-    embed=message.embeds[0]
-
-    embed.color=discord.Color.red()
-    embed.set_footer(text="🔒 Locked — Awaiting Result")
-
-    parlay["locked"]=True
-
-    await message.edit(embed=embed)
 
 # ---------------- CLOSE ----------------
 
@@ -164,7 +97,21 @@ async def close(ctx):
 
     message_id=ctx.message.reference.message_id
 
-    await lock_parlay(message_id)
+    if message_id not in active_parlays:
+        return
+
+    parlay=active_parlays.get(message_id)
+
+    message=await parlay["message"].channel.fetch_message(message_id)
+
+    embed=message.embeds[0]
+
+    parlay["locked"]=True
+
+    embed.color=discord.Color.red()
+    embed.set_footer(text="🔒 Voting Closed — Awaiting Result")
+
+    await message.edit(embed=embed)
 
 # ---------------- SET WINNER ----------------
 
@@ -175,15 +122,83 @@ async def setwinner(ctx,emoji:str):
     await ctx.message.delete()
 
     if not ctx.message.reference:
+        return
+
+    message_id=ctx.message.reference.message_id
+
+    if message_id not in active_parlays:
+        return
+
+    if emoji not in EMOJIS:
+        return
+
+    parlay=active_parlays.get(message_id)
+
+    message=await parlay["message"].channel.fetch_message(message_id)
+
+    embed=message.embeds[0]
+
+    guild_id=parlay["guild_id"]
+
+    leaderboard_data.setdefault(guild_id,{})
+
+    index=EMOJIS.index(emoji)
+
+    team,odds=parlay["teams"][index]
+
+    points=odds_to_points(odds)
+
+    winners=[]
+
+    for reaction in message.reactions:
+
+        if reaction.emoji==emoji:
+            winners=[u async for u in reaction.users() if not u.bot]
+
+    for user in winners:
+
+        uid=str(user.id)
+
+        leaderboard_data[guild_id].setdefault(uid,{
+            "correct":0,
+            "points":0
+        })
+
+        leaderboard_data[guild_id][uid]["correct"]+=1
+        leaderboard_data[guild_id][uid]["points"]+=points
+
+    save_data(leaderboard_data)
+
+    embed.clear_fields()
+
+    embed.add_field(name="🏆 Winner",value=team,inline=False)
+    embed.add_field(name="⭐ Points Awarded",value=f"{points} pts",inline=False)
+
+    if winners:
+        embed.add_field(name="👑 MVP",value=winners[0].mention,inline=False)
+
+    embed.color=discord.Color.red()
+    embed.set_footer(text="Result Recorded")
+
+    await message.edit(embed=embed)
+
+    active_parlays.pop(message_id,None)
+
+# ---------------- RETRO SET ----------------
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def retroset(ctx,emoji:str):
+
+    await ctx.message.delete()
+
+    if not ctx.message.reference:
         await ctx.send("Reply to a parlay message.")
         return
 
     message_id=ctx.message.reference.message_id
 
     message=await ctx.channel.fetch_message(message_id)
-
-    if not message.embeds:
-        return
 
     embed=message.embeds[0]
 
@@ -226,7 +241,6 @@ async def setwinner(ctx,emoji:str):
     for reaction in message.reactions:
 
         if reaction.emoji==emoji:
-
             winners=[u async for u in reaction.users() if not u.bot]
 
     for user in winners:
@@ -243,19 +257,21 @@ async def setwinner(ctx,emoji:str):
 
     save_data(leaderboard_data)
 
-    embed.add_field(name="🏆 Winner",value=team,inline=False)
+    embed.clear_fields()
+
+    embed.add_field(name="🏆 Winner (Retro)",value=team,inline=False)
     embed.add_field(name="⭐ Points Awarded",value=f"{points} pts",inline=False)
 
     if winners:
         embed.add_field(name="👑 MVP",value=winners[0].mention,inline=False)
 
-    embed.set_footer(text="Result Recorded")
+    embed.set_footer(text="Retro Result Recorded")
 
     await message.edit(embed=embed)
 
 # ---------------- LEADERBOARD ----------------
 
-@bot.command(name="leaderboard")
+@bot.command()
 async def leaderboard(ctx):
 
     await ctx.message.delete()
@@ -263,6 +279,7 @@ async def leaderboard(ctx):
     guild=str(ctx.guild.id)
 
     if guild not in leaderboard_data or not leaderboard_data[guild]:
+
         await ctx.send("No stats yet.")
         return
 
@@ -284,30 +301,6 @@ async def leaderboard(ctx):
     )
 
     await ctx.send(embed=embed)
-
-# ---------------- NEW CYCLE ----------------
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def newcycle(ctx):
-
-    await ctx.message.delete()
-
-    guild=str(ctx.guild.id)
-
-    leaderboard_data[guild]={}
-
-    save_data(leaderboard_data)
-
-    await ctx.send("🔄 New cycle started")
-
-# ---------------- ERROR ----------------
-
-@bot.event
-async def on_command_error(ctx,error):
-
-    if isinstance(error,commands.MissingPermissions):
-        await ctx.send("Administrator permission required.")
 
 # ---------------- RUN ----------------
 

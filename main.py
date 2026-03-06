@@ -186,40 +186,45 @@ async def close(ctx):
 
 @bot.command()
 @commands.has_permissions(administrator=True)
-async def setwinner(ctx,emoji:str):
+async def setwinner(ctx, emoji: str):
 
     await ctx.message.delete()
 
     if not ctx.message.reference:
+        await ctx.send("Reply to a parlay message.")
         return
 
-    message=await ctx.channel.fetch_message(ctx.message.reference.message_id)
+    message = await ctx.channel.fetch_message(ctx.message.reference.message_id)
 
-    guild=str(ctx.guild.id)
+    guild = str(ctx.guild.id)
 
-    leaderboard_data.setdefault(guild,{})
+    leaderboard_data.setdefault(guild, {})
 
-    winners=[]
+    winners = []
 
     for reaction in message.reactions:
-        if reaction.emoji==emoji:
-            winners=[u async for u in reaction.users() if not u.bot]
+        if str(reaction.emoji) == emoji:
+            winners = [u async for u in reaction.users() if not u.bot]
 
-    points=1
+    if not winners:
+        await ctx.send("No users voted for that option.")
+        return
 
     for user in winners:
 
-        uid=str(user.id)
+        uid = str(user.id)
 
-        leaderboard_data[guild].setdefault(uid,{
-            "correct":0,
-            "points":0
+        leaderboard_data[guild].setdefault(uid, {
+            "correct": 0,
+            "points": 0
         })
 
-        leaderboard_data[guild][uid]["correct"]+=1
-        leaderboard_data[guild][uid]["points"]+=points
+        leaderboard_data[guild][uid]["correct"] += 1
+        leaderboard_data[guild][uid]["points"] += 1
 
     save_data(leaderboard_data)
+
+    await ctx.send(f"🏆 Winner recorded for {emoji}. {len(winners)} players awarded points.")
 
 # ---------------- RETRO SET ----------------
 

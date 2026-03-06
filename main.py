@@ -47,6 +47,47 @@ def odds_to_points(odds):
     else:
         return max(1,round(abs(odds)/200))
 
+
+def build_bar(percent):
+    filled=int(percent/10)
+    return "▰"*filled+"▱"*(10-filled)
+
+# ---------------- LIVE EMBED ----------------
+
+async def update_embed(message_id):
+
+    if message_id not in active_parlays:
+        return
+
+    parlay=active_parlays[message_id]
+    message=await parlay["message"].channel.fetch_message(message_id)
+
+    embed=message.embeds[0]
+
+    votes=[]
+    total=0
+
+    for reaction in message.reactions:
+        if reaction.emoji in EMOJIS:
+            count=reaction.count-1
+            votes.append(count)
+            total+=count
+
+    desc="React below to vote!\n\n"
+
+    for i,(team,odds) in enumerate(parlay["teams"]):
+
+        vote_count=votes[i] if i<len(votes) else 0
+        percent=(vote_count/total*100) if total>0 else 0
+
+        bar=build_bar(percent)
+
+        desc+=f"{EMOJIS[i]} **{team}** (+{odds})\n{bar} {int(percent)}%\n\n"
+
+    embed.description=desc
+
+    await message.edit(embed=embed)
+
 # ---------------- PARLAY ----------------
 
 @bot.command()
@@ -82,6 +123,46 @@ async def parlay(ctx,name:str,*args):
         "message":message,
         "locked":False
     }
+
+# ---------------- REACTION EVENTS ----------------
+
+@bot.event
+async def on_reaction_add(reaction,user):
+
+    if user.bot:
+        return
+
+    message_id=reaction.message.id
+
+    if message_id not in active_parlays:
+        return
+
+    parlay=active_parlays[message_id]
+
+    if parlay["locked"]:
+        await reaction.remove(user)
+        return
+
+    for react in reaction.message.reactions:
+
+        if react.emoji in EMOJIS and react.emoji!=reaction.emoji:
+
+            users=[u async for u in react.users() if not u.bot]
+
+            if user in users:
+                await react.remove(user)
+
+    await update_embed(message_id)
+
+
+@bot.event
+async def on_reaction_remove(reaction,user):
+
+    if user.bot:
+        return
+
+    if reaction.message.id in active_parlays:
+        await update_embed(reaction.message.id)
 
 # ---------------- CLOSE ----------------
 
@@ -190,46 +271,11 @@ async def retroset(ctx,emoji:str):
     if not ctx.message.reference:
         return
 
-    message_id=ctx.message.reference.message_id
-
-    message=await ctx.channel.fetch_message(message_id)
-
-    embed=message.embeds[0]
-
-    lines=embed.description.split("\n")
-
-    teams=[]
-
-    for line in lines:
-
-        for e in EMOJIS:
-
-            if line.startswith(e):
-
-                try:
-                    team=line.split("**")[1]
-                    odds=line.split("+")[1].split(")")[0]
-
-                    teams.append((team,odds))
-                except:
-                    pass
-
-    if emoji not in EMOJIS:
-        return
-
-    index=EMOJIS.index(emoji)
-
-    if index>=len(teams):
-        return
-
-    team,odds=teams[index]
-
-    points=odds_to_points(odds)
+    message=await ctx.channel.fetch_message(ctx.message.reference.message_id)
 
     winners=[]
 
     for reaction in message.reactions:
-
         if reaction.emoji==emoji:
             winners=[u async for u in reaction.users() if not u.bot]
 
@@ -243,21 +289,9 @@ async def retroset(ctx,emoji:str):
         })
 
         leaderboard_data[uid]["correct"]+=1
-        leaderboard_data[uid]["points"]+=points
+        leaderboard_data[uid]["points"]+=1
 
     save_data(leaderboard_data)
-
-    embed.clear_fields()
-
-    embed.add_field(name="🏆 Winner (Retro)",value=team,inline=False)
-    embed.add_field(name="⭐ Points Awarded",value=f"{points} pts",inline=False)
-
-    if winners:
-        embed.add_field(name="👑 MVP",value=winners[0].mention,inline=False)
-
-    embed.set_footer(text="Retro Result Recorded")
-
-    await message.edit(embed=embed)
 
 # ---------------- LEADERBOARD ----------------
 
@@ -279,7 +313,6 @@ async def leaderboard(ctx):
     desc=""
 
     for uid,stats in sorted_users:
-
         desc+=f"<@{uid}> — {stats['correct']} correct | {stats['points']} pts\n"
 
     embed=discord.Embed(

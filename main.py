@@ -52,7 +52,7 @@ def build_bar(percent):
     filled=int(percent/10)
     return "▰"*filled+"▱"*(10-filled)
 
-# ---------------- LIVE EMBED ----------------
+# ---------------- UPDATE EMBED ----------------
 
 async def update_embed(message_id):
 
@@ -121,7 +121,8 @@ async def parlay(ctx,name:str,*args):
     active_parlays[message.id]={
         "teams":teams,
         "message":message,
-        "locked":False
+        "locked":False,
+        "guild":str(ctx.guild.id)
     }
 
 # ---------------- REACTION EVENTS ----------------
@@ -218,6 +219,10 @@ async def setwinner(ctx,emoji:str):
 
     embed=message.embeds[0]
 
+    guild_id=parlay["guild"]
+
+    leaderboard_data.setdefault(guild_id,{})
+
     index=EMOJIS.index(emoji)
 
     team,odds=parlay["teams"][index]
@@ -235,13 +240,13 @@ async def setwinner(ctx,emoji:str):
 
         uid=str(user.id)
 
-        leaderboard_data.setdefault(uid,{
+        leaderboard_data[guild_id].setdefault(uid,{
             "correct":0,
             "points":0
         })
 
-        leaderboard_data[uid]["correct"]+=1
-        leaderboard_data[uid]["points"]+=points
+        leaderboard_data[guild_id][uid]["correct"]+=1
+        leaderboard_data[guild_id][uid]["points"]+=points
 
     save_data(leaderboard_data)
 
@@ -273,6 +278,10 @@ async def retroset(ctx,emoji:str):
 
     message=await ctx.channel.fetch_message(ctx.message.reference.message_id)
 
+    guild=str(ctx.guild.id)
+
+    leaderboard_data.setdefault(guild,{})
+
     winners=[]
 
     for reaction in message.reactions:
@@ -283,13 +292,13 @@ async def retroset(ctx,emoji:str):
 
         uid=str(user.id)
 
-        leaderboard_data.setdefault(uid,{
+        leaderboard_data[guild].setdefault(uid,{
             "correct":0,
             "points":0
         })
 
-        leaderboard_data[uid]["correct"]+=1
-        leaderboard_data[uid]["points"]+=1
+        leaderboard_data[guild][uid]["correct"]+=1
+        leaderboard_data[guild][uid]["points"]+=1
 
     save_data(leaderboard_data)
 
@@ -300,12 +309,15 @@ async def leaderboard(ctx):
 
     await ctx.message.delete()
 
-    if not leaderboard_data:
+    guild=str(ctx.guild.id)
+
+    if guild not in leaderboard_data or not leaderboard_data[guild]:
+
         await ctx.send("No stats yet.")
         return
 
     sorted_users=sorted(
-        leaderboard_data.items(),
+        leaderboard_data[guild].items(),
         key=lambda x:x[1]["points"],
         reverse=True
     )

@@ -272,7 +272,13 @@ async def setwinner(ctx,emoji:str):
                 except:
                     pass
 
+    if emoji not in EMOJIS:
+        return
+
     index=EMOJIS.index(emoji)
+
+    if index>=len(teams):
+        return
 
     team,odds=teams[index]
 
@@ -327,6 +333,32 @@ async def retroset(ctx,emoji:str):
 
     message=await ctx.channel.fetch_message(ctx.message.reference.message_id)
 
+    embed=message.embeds[0]
+
+    lines=embed.description.split("\n")
+
+    teams=[]
+
+    for line in lines:
+
+        for e in EMOJIS:
+
+            if line.startswith(e):
+
+                try:
+                    team=line.split("**")[1]
+                    odds=line.split("+")[1].split(")")[0]
+
+                    teams.append((team,odds))
+                except:
+                    pass
+
+    index=EMOJIS.index(emoji)
+
+    team,odds=teams[index]
+
+    points=odds_to_points(odds)
+
     guild=str(ctx.guild.id)
 
     leaderboard_data.setdefault(guild,{})
@@ -347,7 +379,7 @@ async def retroset(ctx,emoji:str):
         })
 
         leaderboard_data[guild][uid]["correct"]+=1
-        leaderboard_data[guild][uid]["points"]+=1
+        leaderboard_data[guild][uid]["points"]+=points
 
     save_data(leaderboard_data)
 

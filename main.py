@@ -39,52 +39,49 @@ async def on_ready():
 # ---------------- UTIL ----------------
 
 def odds_to_points(odds):
-
-    odds=int(odds)
-
-    if odds>0:
-        return max(1,round(odds/100))
+    odds = int(odds)
+    if odds > 0:
+        return max(1, round(odds / 100))
     else:
-        return max(1,round(abs(odds)/200))
-
+        return max(1, round(abs(odds) / 200))
 
 def build_bar(percent):
-    filled=int(percent/10)
-    return "▰"*filled+"▱"*(10-filled)
+    filled = int(percent / 10)
+    return "▰"*filled + "▱"*(10-filled)
 
-# ---------------- UPDATE EMBED ----------------
+# ---------------- EMBED BUILDER ----------------
 
-async def update_embed(message_id):
+async def rebuild_embed(message_id):
 
     if message_id not in active_parlays:
         return
 
-    parlay=active_parlays[message_id]
-    message=await parlay["message"].channel.fetch_message(message_id)
+    parlay = active_parlays[message_id]
+    message = await parlay["message"].channel.fetch_message(message_id)
 
-    embed=message.embeds[0]
+    embed = message.embeds[0]
 
-    votes=[]
-    total=0
+    total = 0
+    counts = []
 
     for reaction in message.reactions:
         if reaction.emoji in EMOJIS:
-            count=reaction.count-1
-            votes.append(count)
-            total+=count
+            count = reaction.count - 1
+            counts.append(count)
+            total += count
 
-    desc="React below to vote!\n\n"
+    desc = ""
 
     for i,(team,odds) in enumerate(parlay["teams"]):
 
-        vote_count=votes[i] if i<len(votes) else 0
-        percent=(vote_count/total*100) if total>0 else 0
+        votes = counts[i] if i < len(counts) else 0
+        percent = (votes/total*100) if total>0 else 0
 
-        bar=build_bar(percent)
+        bar = build_bar(percent)
 
-        desc+=f"{EMOJIS[i]} **{team}** (+{odds})\n{bar} {int(percent)}%\n\n"
+        desc += f"{EMOJIS[i]} **{team}** (+{odds})\n{bar} {int(percent)}%\n\n"
 
-    embed.description=desc
+    embed.description = desc
 
     await message.edit(embed=embed)
 
@@ -96,24 +93,15 @@ async def parlay(ctx,name:str,*args):
 
     await ctx.message.delete()
 
-    if len(args)<2 or len(args)%2!=0:
-        return
-
     teams=[(args[i],args[i+1]) for i in range(0,len(args),2)]
 
-    embed=discord.Embed(
+    embed = discord.Embed(
         title=f"🔥 {name}",
-        description="React below to vote!\n\n",
+        description="Loading votes...",
         color=discord.Color.green()
     )
 
-    for i,(team,odds) in enumerate(teams):
-
-        pts=odds_to_points(odds)
-
-        embed.description+=f"{EMOJIS[i]} **{team}** (+{odds}) • {pts} pts\n"
-
-    message=await ctx.send(embed=embed)
+    message = await ctx.send(embed=embed)
 
     for i in range(len(teams)):
         await message.add_reaction(EMOJIS[i])
@@ -125,7 +113,9 @@ async def parlay(ctx,name:str,*args):
         "guild":str(ctx.guild.id)
     }
 
-# ---------------- REACTION EVENTS ----------------
+    await rebuild_embed(message.id)
+
+# ---------------- REACTIONS ----------------
 
 @bot.event
 async def on_reaction_add(reaction,user):
@@ -144,7 +134,6 @@ async def on_reaction_add(reaction,user):
         await reaction.remove(user)
         return
 
-    # enforce one pick per user
     for react in reaction.message.reactions:
 
         if react.emoji in EMOJIS and react.emoji!=reaction.emoji:
@@ -154,7 +143,7 @@ async def on_reaction_add(reaction,user):
             if user in users:
                 await react.remove(user)
 
-    await update_embed(message_id)
+    await rebuild_embed(message_id)
 
 
 @bot.event
@@ -164,7 +153,7 @@ async def on_reaction_remove(reaction,user):
         return
 
     if reaction.message.id in active_parlays:
-        await update_embed(reaction.message.id)
+        await rebuild_embed(reaction.message.id)
 
 # ---------------- CLOSE ----------------
 
@@ -182,16 +171,14 @@ async def close(ctx):
     if message_id not in active_parlays:
         return
 
-    parlay=active_parlays.get(message_id)
-
-    message=await parlay["message"].channel.fetch_message(message_id)
-
-    embed=message.embeds[0]
+    parlay=active_parlays[message_id]
 
     parlay["locked"]=True
 
-    embed.color=discord.Color.red()
-    embed.set_footer(text="🔒 Voting Closed — Awaiting Result")
+    message=await parlay["message"].channel.fetch_message(message_id)
+    embed=message.embeds[0]
+
+    embed.set_footer(text="🔒 Voting Closed")
 
     await message.edit(embed=embed)
 
@@ -206,65 +193,33 @@ async def setwinner(ctx,emoji:str):
     if not ctx.message.reference:
         return
 
-    message_id=ctx.message.reference.message_id
+    message=await ctx.channel.fetch_message(ctx.message.reference.message_id)
 
-    if message_id not in active_parlays:
-        return
+    guild=str(ctx.guild.id)
 
-    if emoji not in EMOJIS:
-        return
-
-    parlay=active_parlays.get(message_id)
-
-    message=await parlay["message"].channel.fetch_message(message_id)
-
-    embed=message.embeds[0]
-
-    guild_id=parlay["guild"]
-
-    leaderboard_data.setdefault(guild_id,{})
-
-    index=EMOJIS.index(emoji)
-
-    team,odds=parlay["teams"][index]
-
-    points=odds_to_points(odds)
+    leaderboard_data.setdefault(guild,{})
 
     winners=[]
 
     for reaction in message.reactions:
-
         if reaction.emoji==emoji:
             winners=[u async for u in reaction.users() if not u.bot]
+
+    points=1
 
     for user in winners:
 
         uid=str(user.id)
 
-        leaderboard_data[guild_id].setdefault(uid,{
+        leaderboard_data[guild].setdefault(uid,{
             "correct":0,
             "points":0
         })
 
-        leaderboard_data[guild_id][uid]["correct"]+=1
-        leaderboard_data[guild_id][uid]["points"]+=points
+        leaderboard_data[guild][uid]["correct"]+=1
+        leaderboard_data[guild][uid]["points"]+=points
 
     save_data(leaderboard_data)
-
-    embed.clear_fields()
-
-    embed.add_field(name="🏆 Winner",value=team,inline=False)
-    embed.add_field(name="⭐ Points Awarded",value=f"{points} pts",inline=False)
-
-    if winners:
-        embed.add_field(name="👑 MVP",value=winners[0].mention,inline=False)
-
-    embed.color=discord.Color.red()
-    embed.set_footer(text="Result Recorded")
-
-    await message.edit(embed=embed)
-
-    active_parlays.pop(message_id,None)
 
 # ---------------- RETRO SET ----------------
 

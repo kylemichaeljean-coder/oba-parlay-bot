@@ -416,6 +416,22 @@ async def leaderboard(ctx):
 
     await ctx.send(embed=embed)
 
+# ---------------- NEW CYCLE ----------------
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def newcycle(ctx):
+
+    await ctx.message.delete()
+
+    guild = str(ctx.guild.id)
+
+    leaderboard_data[guild] = {}
+
+    save_data(leaderboard_data)
+
+    await ctx.send("🔄 New cycle started — leaderboard reset.")
+
 # ---------------- RUN ----------------
 
 bot.run(os.getenv("DISCORD_TOKEN"))
